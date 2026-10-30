@@ -6,7 +6,7 @@ seed: 0
 split_seed: 0
 dev_frac: 0.1
 device: auto
-epochs: 10
+epochs: 15
 batch_size: 128
 lr: 3.0e-4
 weight_decay: 0.05

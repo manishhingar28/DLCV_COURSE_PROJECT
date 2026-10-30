@@ -17,20 +17,20 @@ def code(s):
 md("""
 # FFS + Redundancy-Aware Selection — run everything on Colab
 
-**Before you start:** Runtime → Change runtime type → **T4 GPU** (free tier works).
+**Before you start:** Runtime → Change runtime type → **T4 GPU** (free tier works; only small outputs go to your Drive).
 Then run the cells top to bottom (Runtime → Run all).
 
-Everything is saved to your Google Drive (`MyDrive/dlcv_ffs/`), so if Colab disconnects you can
-re-run and it will **skip what is already done**.
+Everything except the raw videos is saved to your Google Drive (`MyDrive/dlcv_ffs/`), so if Colab disconnects you can
+re-run and it will **skip what is already done**. Total ~4-6 h of GPU time: on free Colab this may take 2 sessions.
 
 | Step | What it does | Rough time (T4) |
 |---|---|---|
 | 1–3 | GPU check, Drive, code + packages | 2 min |
 | 4 | NExT-QA questions (from GitHub) | <1 min |
 | 5 | NExT-QA videos (Google Drive zip) | 10–30 min |
-| 6 | CLIP features for 32 frames/video | 40–90 min |
-| 7 | Train downstream QA model | ~5 min |
-| 8 | Train selectors: fixed top-k, FFS, **ours**, 3 seeds | 60–90 min |
+| 6 | EVA02-CLIP-L/14 features for 32 frames/video (resumable) | 1.5–3 h |
+| 7 | Train downstream QA model | ~10 min |
+| 8 | Train selectors: fixed top-k, FFS, **ours**, 3 seeds (use `SEEDS=[0]` if short on GPU time) | 1.5–2.5 h |
 | 9 | Evaluate on NExT-QA val, tables + plots | ~2 min |
 | 10 | Qualitative figure | ~2 min |
 """)
@@ -60,7 +60,7 @@ if REPO_URL:
 else:
     !rm -rf ffs-diverse && unzip -q -o $WORK/ffs-diverse.zip -d /content/
 %cd /content/ffs-diverse
-!pip -q install open_clip_torch gdown opencv-python-headless
+!pip -q install open_clip_torch timm gdown opencv-python-headless
 !pip -q install decord || echo "decord not available - using OpenCV (fine, a bit slower)"
 !python tests/test_selector.py
 """)
@@ -77,34 +77,41 @@ for f in ['train.csv', 'val.csv', 'map_vid_vidorID.json']:
 
 md("""
 ## 5. NExT-QA videos
-Downloads the official `NExTVideo.zip` into your Drive (only once).
+Downloads the official `NExTVideo.zip` straight to Colab's local disk (NOT your Drive, so a free 15 GB Drive is enough).
+If Colab disconnects, this re-downloads (10-30 min); everything else is kept in Drive.
 
 **If gdown fails** ("Too many users have viewed or downloaded this file"):
 open https://drive.google.com/file/d/1jTcRCrVHS66ckOUfWRb-rXdzJ52XAWQH/view in your browser,
-click **Add shortcut to Drive** (or *Make a copy*) into `MyDrive/dlcv_ffs/`, name it `NExTVideo.zip`,
-then re-run this cell.
+click **Add shortcut to Drive**, put it in `MyDrive/dlcv_ffs/` and rename the shortcut to `NExTVideo.zip`
+(a shortcut uses none of your storage), then re-run this cell.
 """)
 code("""
-ZIP = f'{WORK}/NExTVideo.zip'
-if not os.path.exists(ZIP):
-    !gdown 1jTcRCrVHS66ckOUfWRb-rXdzJ52XAWQH -O $ZIP
-!ls -lh $ZIP
-# copy to local disk: reading from local disk is much faster than from Drive
 LOCAL_ZIP = '/content/NExTVideo.zip'
+DRIVE_ZIP = f'{WORK}/NExTVideo.zip'          # only used if you added a shortcut (see above)
 if not os.path.exists(LOCAL_ZIP):
-    !cp $ZIP $LOCAL_ZIP
+    if os.path.exists(DRIVE_ZIP):
+        !cp "$DRIVE_ZIP" $LOCAL_ZIP
+    else:
+        !gdown 1jTcRCrVHS66ckOUfWRb-rXdzJ52XAWQH -O $LOCAL_ZIP
+!ls -lh $LOCAL_ZIP
+!df -h /content | tail -1
 """)
 
 md("""
-## 6. Extract CLIP features (32 evenly spaced frames per video)
-Resumable: per-video features are cached in Drive. Set `QUICK = True` for a 10-minute trial
-on 300 videos first (numbers will be lower — only for checking that everything runs).
+## 6. Extract frozen features (32 evenly spaced frames per video)
+Default: **EVA02-CLIP-L/14** (same EVA-CLIP family as the paper's backbone, much stronger than CLIP B/32).
+Takes ~1.5-3 h on a free T4. It is resumable: per-video features are cached in Drive, so after a disconnect just re-run.
+* Faster but weaker option: set `FEATURE_MODEL = 'ViT-B-32'`.
+* Set `QUICK = True` for a short trial on 300 videos first (numbers will be lower, only to check everything runs).
 """)
 code("""
 QUICK = False
-FEAT = f'{WORK}/features' if not QUICK else f'{WORK}/features_quick'
+FEATURE_MODEL = 'EVA02-L-14'          # or 'ViT-B-32' (faster, weaker)
+PRETRAINED = {'EVA02-L-14': 'merged2b_s4b_b131k', 'ViT-B-32': 'openai'}[FEATURE_MODEL]
+TAG = FEATURE_MODEL + ('_quick' if QUICK else '')
+FEAT = f'{WORK}/features_{TAG}'
 extra = '--max_videos 300' if QUICK else ''
-!python scripts/extract_features.py --video_zip $LOCAL_ZIP --ann_dir $ANN --out_dir $FEAT --n_frames 32 $extra
+!python scripts/extract_features.py --video_zip $LOCAL_ZIP --ann_dir $ANN --out_dir $FEAT --n_frames 32 --model $FEATURE_MODEL --pretrained $PRETRAINED $extra
 !ls -lh $FEAT/*.pt
 """)
 
@@ -112,7 +119,7 @@ md("""
 ## 7. Train the downstream QA model (stand-in for the big frozen VLM), then freeze it
 """)
 code("""
-CK = f'{WORK}/checkpoints' if not QUICK else f'{WORK}/checkpoints_quick'
+CK = f'{WORK}/checkpoints_{TAG}'
 if not os.path.exists(f'{CK}/downstream/downstream.pt'):
     !python train_downstream.py --config configs/downstream.yaml --data_dir $FEAT --out_dir $CK/downstream
 !tail -3 $CK/downstream/train_log.txt
@@ -151,7 +158,7 @@ if RUN_ABLATIONS:
 
 md("## 9. Evaluate everything on the NExT-QA validation set (4,996 questions)")
 code("""
-RES = f'{WORK}/results' if not QUICK else f'{WORK}/results_quick'
+RES = f'{WORK}/results_{TAG}'
 !python evaluate.py --data_dir $FEAT --downstream $CK/downstream/downstream.pt --runs $CK --out_dir $RES
 from IPython.display import Markdown, Image, display
 display(Markdown(open(f'{RES}/results_table.md').read()))
@@ -173,7 +180,7 @@ Creates `submission_artifacts.zip` in your Drive (checkpoints, configs, logs, re
 Share it with "Anyone with the link" and paste the link into the README.
 """)
 code("""
-!cd $WORK && zip -q -r submission_artifacts.zip checkpoints results -x "*/cache/*"
+!cd $WORK && zip -q -r submission_artifacts.zip checkpoints_$TAG results_$TAG -x "*/cache/*"
 !ls -lh $WORK/submission_artifacts.zip
 """)
 

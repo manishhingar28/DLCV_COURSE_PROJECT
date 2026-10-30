@@ -56,8 +56,9 @@ for f in train.csv val.csv map_vid_vidorID.json; do
 cd ..
 # 2) raw videos (official Google Drive zip)
 gdown 1jTcRCrVHS66ckOUfWRb-rXdzJ52XAWQH -O NExTVideo.zip
-# 3) frozen CLIP ViT-B/32 features: 32 evenly spaced frames/video + text features
-python scripts/extract_features.py --video_zip NExTVideo.zip --ann_dir nextqa_ann --out_dir features --n_frames 32
+# 3) frozen EVA02-CLIP-L/14 features (same EVA-CLIP family as the paper): 32 evenly spaced frames/video + text
+python scripts/extract_features.py --video_zip NExTVideo.zip --ann_dir nextqa_ann --out_dir features --n_frames 32 \
+       --model EVA02-L-14 --pretrained merged2b_s4b_b131k      # faster/weaker: --model ViT-B-32 --pretrained openai
 ```
 
 Expected layout:
@@ -95,7 +96,7 @@ Main hyper-parameters (all in `configs/*.yaml`):
 |---|---|---|
 | Model | 2-layer transformer, d=256 + contrastive branch | 2-layer transformer, d=256 |
 | Optimiser | AdamW, lr 3e-4, wd 0.05, one-cycle | AdamW, lr 3e-4, wd 0.05, one-cycle |
-| Epochs / batch | 15 / 128 | 10 / 128 |
+| Epochs / batch | 20 / 128 | 15 / 128 |
 | Selection | – | k=4, c=3 [CTRL] → 1–4 frames, Gumbel τ=1 |
 | RAS | – | β init 1.0 (learned), centred similarity |
 | Aux loss | – | λ_count = 1.0 (identical for FFS and ours) |
@@ -136,8 +137,10 @@ all with the **same frozen downstream model**. Outputs:
 ## 7. Differences from the paper (and why)
 
 * **Downstream model.** The paper uses an 8B EVA-CLIP based VLM. We use a small transformer + contrastive (CLIP-similarity) answerer
-  over frozen CLIP ViT-B/32 features (~2M params), trained once and then frozen. Absolute accuracy is therefore lower than in the paper.
+  (~2M params) over frozen EVA02-CLIP-L/14 features, trained once and then frozen. Absolute accuracy is therefore lower than in the paper.
   All methods share the same downstream model, so the comparison is fair.
+* **Selector input features.** The paper feeds the selector cheap CLIP-B/32 features. We pre-compute one EVA02-L/14 feature set
+  and share it between selector and downstream model. Efficiency is measured, as in the paper, by frames passed to the downstream model.
 * **Auxiliary supervision.** The paper says it supervises the selection "with a set of fixed-k policies", with details in a supplement we
   don't have. Our version: for each question, k\* = the smallest j ∈ [k_low, k_high] for which the frozen model answers correctly from the
   selector's own top-j frames. A margin hinge then makes [CTRL] act as a threshold that admits k\* frames (`count_hinge_loss`).

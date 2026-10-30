@@ -5,6 +5,7 @@ tqdm
 matplotlib
 pillow
 open_clip_torch>=2.20
+timm
 opencv-python-headless
 gdown
 # optional, faster video reading (falls back to OpenCV if missing):
