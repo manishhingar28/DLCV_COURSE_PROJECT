@@ -1,0 +1,26 @@
+# OURS: FFS + Redundancy-Aware Selection (RAS), 1..4 frames, learnable beta
+out_dir: checkpoints/ffs_ras
+data_dir: features
+downstream: checkpoints/downstream/downstream.pt
+seed: 0
+split_seed: 0
+dev_frac: 0.1
+device: auto
+epochs: 10
+batch_size: 128
+lr: 3.0e-4
+weight_decay: 0.05
+lambda_count: 1.0   # aux frame-count supervision from fixed-k policies (same for all flexible selectors)
+lambda_budget: 0.0
+lambda_red: 0.0
+selector:
+  d_model: 256
+  n_layers: 2
+  n_heads: 4
+  dropout: 0.1
+  tau: 1.0
+  k: 4
+  n_ctrl: 3
+  beta: 1.0          # initial redundancy strength
+  learn_beta: true   # learned end-to-end from the task loss
+  sim_mode: centered # penalise only frames more similar than the video's average

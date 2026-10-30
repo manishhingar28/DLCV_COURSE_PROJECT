@@ -1,0 +1,18 @@
+# Stage 1: downstream QA model (stand-in for the paper's large frozen VLM)
+data_dir: features
+out_dir: checkpoints/downstream
+seed: 0
+split_seed: 0          # which train videos are held out as dev (keep fixed across all runs)
+dev_frac: 0.1
+device: auto
+d_model: 256
+n_layers: 2
+n_heads: 4
+dropout: 0.1
+epochs: 15
+batch_size: 128
+lr: 3.0e-4
+weight_decay: 0.05
+k_min: 1               # trained on random subsets of 1..8 frames
+k_max: 8
+p_all_frames: 0.1      # and sometimes all 32 frames

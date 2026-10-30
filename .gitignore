@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+features*/
+checkpoints*/
+runs_dummy*/
+results_dummy/
+*.zip
+report/*.aux
+report/*.log
+report/*.fls
+report/*.fdb_latexmk

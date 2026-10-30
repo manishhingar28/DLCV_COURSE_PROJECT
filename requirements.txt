@@ -1,0 +1,11 @@
+torch>=2.1
+numpy
+pyyaml
+tqdm
+matplotlib
+pillow
+open_clip_torch>=2.20
+opencv-python-headless
+gdown
+# optional, faster video reading (falls back to OpenCV if missing):
+# decord
