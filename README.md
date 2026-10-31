@@ -80,6 +80,7 @@ python train_downstream.py --config configs/downstream.yaml --data_dir features 
 # Stage 2: selectors trained against the frozen downstream model (seeds 0,1,2)
 for s in 0 1 2; do
   python train_selector.py --config configs/fixed_topk.yaml --seed $s   # ablation: always 4 frames
+  python train_selector.py --config configs/fixed_topk_ras.yaml --seed $s   # OURS at a fixed budget: top-4 + RAS
   python train_selector.py --config configs/ffs.yaml        --seed $s   # baseline: FFS, 1–4 frames
   python train_selector.py --config configs/ffs_ras.yaml    --seed $s   # OURS:     FFS + RAS, 1–4 frames
 done
@@ -94,12 +95,12 @@ Main hyper-parameters (all in `configs/*.yaml`):
 
 | | Downstream | Selectors |
 |---|---|---|
-| Model | 2-layer transformer, d=256 + contrastive branch | 2-layer transformer, d=256 |
-| Optimiser | AdamW, lr 3e-4, wd 0.05, one-cycle | AdamW, lr 3e-4, wd 0.05, one-cycle |
-| Epochs / batch | 20 / 128 | 15 / 128 |
+| Model | 2-layer transformer, d=256 + contrastive branch | 2-layer transformer, d=256 + per-frame similarity cues |
+| Optimiser | AdamW, lr 1e-4, wd 0.1, dropout 0.3, one-cycle | AdamW, lr 3e-4, wd 0.05, one-cycle |
+| Epochs / batch | 20 / 128 | 10 / 128 |
 | Selection | – | k=4, c=3 [CTRL] → 1–4 frames, Gumbel τ=1 |
 | RAS | – | β init 1.0 (learned), centred similarity |
-| Aux loss | – | λ_count = 1.0 (identical for FFS and ours) |
+| Aux loss | – | λ_count = 1.0, count tolerance ε = 0.1 (identical for FFS and ours) |
 
 ## 5. Inference and evaluation
 
@@ -143,11 +144,21 @@ all with the **same frozen downstream model**. Outputs:
   and share it between selector and downstream model. Efficiency is measured, as in the paper, by frames passed to the downstream model.
 * **Auxiliary supervision.** The paper says it supervises the selection "with a set of fixed-k policies", with details in a supplement we
   don't have. Our version: for each question, k\* = the smallest j ∈ [k_low, k_high] for which the frozen model answers correctly from the
-  selector's own top-j frames. A margin hinge then makes [CTRL] act as a threshold that admits k\* frames (`count_hinge_loss`).
+  selector's own top-j frames gives an answer loss within ε = 0.1 of the best j (plain "first correct j" collapsed to 1 frame,
+  because this answer model can often guess from the text alone). A margin hinge then makes [CTRL] act as a threshold that admits k\* frames (`count_hinge_loss`).
 * **Gradient decoupling.** Without it, the task loss always pushed the selector to use all k frames. So the task gradient only
   flows through a relaxation over frames (which frames). The [CTRL] threshold (how many) is learned by the count loss. Forward
   selections are unchanged.
-* These three choices are applied **identically** to FFS and FFS+RAS. The only difference between the two configs is `beta`.
+* **Selector similarity cues.** In a pilot on 300 training videos the selector's scores stayed flat (it was no better than random).
+  We therefore add four per-frame zero-shot cues (cosine to the question, best and second-best option similarity, and their gap,
+  standardised within each video) to the frame tokens and to the logit. This raised the share of selected frames that favour the
+  correct answer from 42% (uniform) to about 46%.
+* **Regularised downstream model.** The pilot downstream model memorised its training set after 2 epochs, so it uses dropout 0.3,
+  weight decay 0.1 and lr 1e-4.
+* All tuning used held-out *training* videos only, never the validation set.
+* These choices are applied **identically** to FFS and FFS+RAS. The only difference between the paired configs
+  (`ffs` vs `ffs_ras`, `fixed_topk` vs `fixed_topk_ras`) is `beta`.
+* An optional relevance-distillation loss (`lambda_distill`, off by default) is included; it did not help in the pilot.
 
 ## 8. Code organisation
 

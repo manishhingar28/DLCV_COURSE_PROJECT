@@ -6,11 +6,11 @@ seed: 0
 split_seed: 0
 dev_frac: 0.1
 device: auto
-epochs: 15
+epochs: 10
 batch_size: 128
-lr: 3.0e-4
+lr: 0.0003
 weight_decay: 0.05
-lambda_count: 1.0   # aux frame-count supervision from fixed-k policies (same for all flexible selectors)
+lambda_count: 1.0
 lambda_budget: 0.0
 lambda_red: 0.0
 selector:
@@ -23,3 +23,7 @@ selector:
   n_ctrl: 3
   beta: 0.0
   learn_beta: false
+  sim_feats: true
+lambda_distill: 0.0
+distill_temp: 0.01
+count_eps: 0.1

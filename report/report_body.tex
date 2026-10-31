@@ -29,7 +29,7 @@ and $\gamma_i$ is Gumbel noise (training only); picked \texttt{[CTRL]}s are drop
 sampler~\cite{xie2019subset} with the same penalty, $w\leftarrow w+\log(1-p)-\tfrac{\beta}{\tau}Sp$, $p=\mathrm{softmax}(w)$,
 plus a straight-through estimator; $\beta=\mathrm{softplus}(\rho)$ is learned. The \emph{only} difference from our FFS
 re-implementation is $\beta$ ($\beta=0$ gives FFS exactly). Both share one recipe: count supervision from fixed-$k$ policies
-(a \texttt{[CTRL]} hinge to $k^\star$, the fewest frames that answer correctly) and task gradients restricted to frames.
+(a \texttt{[CTRL]} hinge to $k^\star$, the fewest frames whose answer loss is within $\epsilon$ of the best) and task gradients restricted to frames.
 
 \section{Theoretical Justification}
 \textbf{Diminishing returns.} Eq.~(1) is the greedy step for

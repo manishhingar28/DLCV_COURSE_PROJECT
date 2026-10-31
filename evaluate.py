@@ -129,7 +129,7 @@ def main():
 
     # ---- trained selectors ----
     sel_flops = {}
-    pref = ["fixed_topk", "ffs", "ffs_ras", "ffs_ras_fixedbeta", "ffs_k8", "ffs_ras_k8"]
+    pref = ["fixed_topk", "fixed_topk_ras", "ffs", "ffs_ras", "ffs_ras_fixedbeta", "ffs_k8", "ffs_ras_k8"]
     mdirs = sorted(glob.glob(os.path.join(args.runs, "*")),
                    key=lambda p: (pref.index(os.path.basename(p)) if os.path.basename(p) in pref else 99, p))
     for mdir in mdirs:
@@ -145,9 +145,9 @@ def main():
             sel.eval()
 
             def fn(b, sel=sel):
-                return sel(b["frames"], b["q"], b["opt"])["hard"]
+                return sel(b["frames"], b["q"], b["opt"], b["qa"])["hard"]
             r, perq = run_method(split, downstream, fn)
-            r["beta"] = float(sel.beta)
+            r["beta"] = float(sel.beta.detach())
             per_seed.append(r)
             perq_first = perq_first or perq
         a = agg(per_seed)
@@ -158,7 +158,7 @@ def main():
             from torch.utils.flop_counter import FlopCounterMode
             b = split.batch([0])
             with FlopCounterMode(display=False) as fc:
-                sel(b["frames"], b["q"], b["opt"])
+                sel(b["frames"], b["q"], b["opt"], b["qa"])
             a["selector_GFLOPs"] = fc.get_total_flops() / 1e9
         except Exception:
             pass
@@ -187,7 +187,7 @@ def main():
                    + f" & {r['redundancy']:.3f} \\\\")
     tex += [r"\bottomrule", r"\end{tabular}"]
     # compact table for the one-page report
-    nice = {"uniform@4": "Uniform@4", f"uniform@{T}": f"Uniform@{T}", "fixed_topk": "Fixed top-4",
+    nice = {"uniform@4": "Uniform@4", f"uniform@{T}": f"Uniform@{T}", "fixed_topk": "Fixed top-4", "fixed_topk_ras": r"\textbf{Top-4+RAS (ours)}",
             "ffs": "FFS (re-impl.)", "ffs_ras": r"\textbf{FFS+RAS (ours)}"}
     ctex = [r"\begin{tabular}{@{}lccccccc@{}}", r"\toprule",
             r"Method & Frames & Acc & C & T & D & Red.$\downarrow$ & Cost \\", r"\midrule"]

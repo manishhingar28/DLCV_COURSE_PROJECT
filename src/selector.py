@@ -110,9 +110,14 @@ class FrameSelector(nn.Module):
 
     def __init__(self, d_in=512, d_model=256, n_layers=2, n_heads=4, n_frames=32,
                  k=4, n_ctrl=3, beta=0.0, learn_beta=False, sim_mode="centered",
-                 tau=1.0, dropout=0.1, decouple=True):
+                 tau=1.0, dropout=0.1, decouple=True, sim_feats=False):
         super().__init__()
         self.decouple = decouple
+        self.sim_feats = sim_feats
+        if sim_feats:
+            # per-frame zero-shot cues (question similarity, best/second option similarity, option gap)
+            self.cue_proj = nn.Sequential(nn.Linear(4, d_model), nn.GELU(), nn.Linear(d_model, d_model))
+            self.cue_logit = nn.Linear(4, 1)      # direct skip to the selection logit
         assert 0 <= n_ctrl < k, "need 0 <= n_ctrl < k  (k_low = k - n_ctrl >= 1)"
         self.k, self.n_ctrl, self.n_frames = k, n_ctrl, n_frames
         self.tau, self.sim_mode = tau, sim_mode
@@ -147,9 +152,23 @@ class FrameSelector(nn.Module):
     def beta(self):
         return F.softplus(self.beta_raw) if self.use_redundancy else torch.zeros((), device=self.beta_raw.device)
 
-    def forward(self, frames, question, options):
+    @staticmethod
+    def frame_cues(frames, question, qa):
+        fn = F.normalize(frames.float(), dim=-1)
+        qs = torch.einsum("bd,btd->bt", F.normalize(question.float(), dim=-1), fn)
+        cos = torch.einsum("bmd,btd->bmt", F.normalize(qa.float(), dim=-1), fn)
+        top2 = cos.topk(2, dim=1).values
+        cues = torch.stack([qs, top2[:, 0], top2[:, 1], top2[:, 0] - top2[:, 1]], -1)   # (B,T,4)
+        # standardise within each video so the cues are relative ("which frame is best here")
+        return (cues - cues.mean(1, keepdim=True)) / (cues.std(1, keepdim=True) + 1e-4)
+
+    def forward(self, frames, question, options, qa=None):
         B, T, _ = frames.shape
         v = self.v_proj(frames.float()) + self.pos[:, :T] + self.mod[0]
+        cues = None
+        if self.sim_feats:
+            cues = self.frame_cues(frames, question, qa if qa is not None else options)
+            v = v + self.cue_proj(cues)
         toks = [v]
         if self.n_ctrl > 0:
             # [CTRL] init: mean visual embedding + learnable embedding (as in the paper)
@@ -161,6 +180,8 @@ class FrameSelector(nn.Module):
         x = self.norm(self.encoder(torch.cat(toks, 1)))
         sel_tok = x[:, : T + self.n_ctrl]
         logits = self.head(sel_tok).squeeze(-1)                         # (B, T + c)
+        if cues is not None:
+            logits = torch.cat([logits[:, :T] + self.cue_logit(cues).squeeze(-1), logits[:, T:]], 1)
 
         S = frame_similarity(frames, self.n_ctrl, self.sim_mode) if self.use_redundancy else None
         g = gumbel_like(logits) if self.training else torch.zeros_like(logits)
@@ -235,13 +256,15 @@ def count_hinge_loss(logits, T, k, target, margin=1.0, frame_scores=None):
 
 
 @torch.no_grad()
-def oracle_count(selector, out, frames, qa, answer, downstream):
+def oracle_count(selector, out, frames, qa, answer, downstream, eps=None):
     """
     Auxiliary target from a family of fixed-k policies (our reading of the paper's
-    'supervise the selection behaviour with a set of fixed-k policies'):
-    rank frames with the selector's OWN greedy order (no noise, no [CTRL]),
-    then k* = smallest j in [k_low, k_high] such that the frozen downstream model
-    answers correctly from the top-j frames; k* = k_high if none is correct.
+    'supervise the selection behaviour with a set of fixed-k policies').
+    Rank frames with the selector's OWN greedy order (no noise, no [CTRL]); for
+    j in [k_low, k_high] evaluate the frozen downstream model on the top-j frames.
+      eps is None : k* = smallest j that answers correctly (k_high if none)
+      eps = e     : k* = smallest j whose answer loss is within e of the best j
+                    ("fewest frames that are nearly as good as the best budget")
     FFS and FFS+RAS are each supervised with their own ranking (RAS uses its penalty).
     """
     T = frames.shape[1]
@@ -249,17 +272,42 @@ def oracle_count(selector, out, frames, qa, answer, downstream):
     S = out["S"][:, :T, :T] if out["S"] is not None else None
     _, order = greedy_frame_scores(out["logits"][:, :T].detach(), k_hi, S, selector.beta.detach())
     B = frames.shape[0]
-    target = torch.full((B,), float(k_hi), device=frames.device)
-    found = torch.zeros(B, dtype=torch.bool, device=frames.device)
     mask = torch.zeros(B, T, device=frames.device)
+    losses, corrects = [], []
     for j in range(k_hi):
         mask.scatter_(1, order[:, j:j + 1], 1.0)
         if j + 1 < k_lo:
             continue
-        ok = downstream(frames, mask, qa).argmax(-1) == answer
-        target[ok & ~found] = float(j + 1)
-        found |= ok
-    return target
+        lg = downstream(frames, mask, qa)
+        losses.append(F.cross_entropy(lg, answer, reduction="none"))
+        corrects.append(lg.argmax(-1) == answer)
+    L = torch.stack(losses, 1)                       # (B, k_hi - k_lo + 1)
+    C = torch.stack(corrects, 1)
+    js = torch.arange(k_lo, k_hi + 1, device=frames.device, dtype=torch.float)
+    if eps is None:
+        first = torch.where(C, js, torch.full_like(js, float(k_hi))).min(1).values
+        return first
+    good = L <= L.min(1, keepdim=True).values + eps
+    return torch.where(good, js, torch.full_like(js, float(k_hi))).min(1).values
+
+
+def relevance_targets(frames, qa, answer):
+    """
+    Label-free (no frame annotations) frame relevance from the TRAINING answer label:
+    margin_t = cos(qa_correct, f_t) - max_{m != correct} cos(qa_m, f_t),
+    i.e. how strongly frame t makes the correct option stand out (frozen features).
+    """
+    cos = torch.einsum("bmd,btd->bmt", F.normalize(qa.float(), dim=-1), F.normalize(frames.float(), dim=-1))
+    B, M, T = cos.shape
+    pos = cos.gather(1, answer.view(B, 1, 1).expand(B, 1, T)).squeeze(1)
+    neg = cos.masked_fill(F.one_hot(answer, M).bool().unsqueeze(-1), -2.0).max(1).values
+    return pos - neg                                   # (B, T)
+
+
+def relevance_distill_loss(frame_logits, margin, temp=0.01):
+    """KL( softmax(margin / temp) || softmax(frame_logits) ): teach the selector which frames carry evidence."""
+    target = torch.softmax(margin / temp, dim=-1)
+    return F.kl_div(F.log_softmax(frame_logits, dim=-1), target, reduction="batchmean")
 
 
 def redundancy_loss(mask, frames):

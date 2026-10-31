@@ -7,6 +7,7 @@ Stage 2: train a frame selector against the FROZEN downstream model.
 
 Loss = CrossEntropy(downstream answer)                       (task loss, backprop through STE mask)
      + lambda_count  * hinge([CTRL] threshold lets k* frames in) (aux: k* from fixed-k policies, see src/selector.py)
+     + lambda_distill* KL(frame relevance || selector)        (aux: which frames carry evidence for the answer)
      + lambda_budget * mean(#selected / k)                   (optional, off by default)
      + lambda_red    * pairwise redundancy of selection       (optional, off by default)
 """
@@ -19,7 +20,7 @@ import torch.nn.functional as F
 from src.data import FeatureSplit
 from src.downstream import DownstreamQA
 from src.selector import (FrameSelector, count_hinge_loss, greedy_frame_scores, oracle_count,
-                          redundancy_loss)
+                          redundancy_loss, relevance_distill_loss, relevance_targets)
 from src.utils import Logger, count_params, get_device, load_yaml, save_json, set_seed
 
 
@@ -40,7 +41,7 @@ def build_selector(cfg, dim, n_frames):
                          k=s["k"], n_ctrl=s["n_ctrl"], beta=s.get("beta", 0.0),
                          learn_beta=s.get("learn_beta", False), sim_mode=s.get("sim_mode", "centered"),
                          tau=s.get("tau", 1.0), dropout=s.get("dropout", 0.1),
-                         decouple=s.get("decouple", True))
+                         decouple=s.get("decouple", True), sim_feats=s.get("sim_feats", False))
 
 
 @torch.no_grad()
@@ -48,7 +49,7 @@ def evaluate(selector, downstream, split, bs=256):
     selector.eval()
     correct, frames = 0, 0.0
     for b in split.iterate(bs):
-        out = selector(b["frames"], b["q"], b["opt"])
+        out = selector(b["frames"], b["q"], b["opt"], b["qa"])
         pred = downstream(b["frames"], out["hard"], b["qa"]).argmax(-1)
         correct += (pred == b["answer"]).sum().item()
         frames += out["n_sel"].sum().item()
@@ -92,22 +93,29 @@ def main():
     g = torch.Generator().manual_seed(cfg["seed"])
     lam_b, lam_r = cfg.get("lambda_budget", 0.0), cfg.get("lambda_red", 0.0)
     lam_c = cfg.get("lambda_count", 0.0)
+    lam_d, d_temp = cfg.get("lambda_distill", 0.0), cfg.get("distill_temp", 0.01)
+    c_eps = cfg.get("count_eps", None)
 
     best, hist = -1.0, []
     for ep in range(cfg["epochs"]):
         sel.train()
         tot, nsel, n = 0.0, 0.0, 0
         for b in tr.iterate(cfg["batch_size"], shuffle=True, generator=g):
-            out = sel(b["frames"], b["q"], b["opt"])
+            out = sel(b["frames"], b["q"], b["opt"], b["qa"])
             logits = downstream(b["frames"], out["mask"], b["qa"])
             loss = F.cross_entropy(logits, b["answer"])
             if lam_c > 0 and sel.n_ctrl > 0:
                 # aux: soft frame count -> k* from fixed-k policies (identical for FFS and ours)
                 T = b["frames"].shape[1]
-                tgt = oracle_count(sel, out, b["frames"], b["qa"], b["answer"], downstream)
+                tgt = oracle_count(sel, out, b["frames"], b["qa"], b["answer"], downstream, c_eps)
                 S = out["S"][:, :T, :T] if out["S"] is not None else None
                 fs, _ = greedy_frame_scores(out["logits"][:, :T], sel.k, S, sel.beta)
                 loss = loss + lam_c * count_hinge_loss(out["logits"], T, sel.k, tgt, frame_scores=fs)
+            if lam_d > 0:
+                # aux: frame relevance from the training answer (identical for FFS and ours)
+                T = b["frames"].shape[1]
+                marg = relevance_targets(b["frames"], b["qa"], b["answer"])
+                loss = loss + lam_d * relevance_distill_loss(out["logits"][:, :T], marg, d_temp)
             if lam_b > 0:
                 # differentiable expected number of selected frames (soft k-hot), normalised by k
                 loss = loss + lam_b * out["soft"].sum(-1).mean() / sel.k
@@ -123,7 +131,7 @@ def main():
             nsel += out["n_sel"].sum().item()
             n += B
         acc, avgf = evaluate(sel, downstream, dv)
-        beta = float(sel.beta)
+        beta = float(sel.beta.detach())
         hist.append({"epoch": ep + 1, "loss": tot / n, "train_avg_frames": nsel / n,
                      "dev_acc": acc, "dev_avg_frames": avgf, "beta": beta})
         log(f"epoch {ep+1:02d} | loss {tot/n:.4f} | train frames {nsel/n:.2f} | "
