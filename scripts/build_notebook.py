@@ -3,6 +3,7 @@ import json
 import os
 
 cells = []
+GUARD = "assert 'WORK' in globals(), 'Colab restarted and forgot the earlier cells: use Runtime > Run all'\n"
 
 
 def md(s):
@@ -10,6 +11,8 @@ def md(s):
 
 
 def code(s):
+    if "drive.mount" not in s and "nvidia-smi" not in s:
+        s = GUARD + s
     cells.append({"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [],
                   "source": s.strip("\n")})
 
@@ -162,7 +165,7 @@ md("""
 """)
 code("""
 CK = f'{WORK}/checkpoints_{TAG}'
-if not os.path.exists(f'{CK}/downstream/downstream.pt'):
+if not os.path.exists(f'{CK}/downstream/history.json'):   # written only when training finished
     !python train_downstream.py --config configs/downstream.yaml --data_dir $FEAT --out_dir $CK/downstream
 !tail -3 $CK/downstream/train_log.txt
 assert os.path.exists(f'{CK}/downstream/downstream.pt'), 'DOWNSTREAM TRAINING FAILED - see error above'
@@ -170,20 +173,19 @@ assert os.path.exists(f'{CK}/downstream/downstream.pt'), 'DOWNSTREAM TRAINING FA
 
 md("""
 ## 8. Train the frame selectors
-* `fixed_topk` – always 4 frames (no [CTRL])  — ablation
-* `fixed_topk_ras` – always 4 frames + our redundancy-aware selection — **ours at a fixed budget**
-* `ffs` – the paper's Flexible Frame Selector, 1–4 frames — **baseline**
-* `ffs_ras` – FFS + Redundancy-Aware Selection — **ours**
+* `fixed_topk_nocue` / `ffs_nocue` – top-4 and the paper's FFS (1–4 frames) with FFS-style input — **baselines**
+* `fixed_topk` / `ffs` – the same selectors + similarity cues — **ours**
+* `fixed_topk_ras` / `ffs_ras` – ours + redundancy-aware selection — **ablation**
 
 Three seeds each, so the table can show mean ± std. Already-finished runs are skipped.
 """)
 code("""
 SEEDS = [0, 1, 2] if not QUICK else [0]
-METHODS = ['fixed_topk', 'fixed_topk_ras', 'ffs', 'ffs_ras']
+METHODS = ['fixed_topk_nocue', 'fixed_topk', 'fixed_topk_ras', 'ffs_nocue', 'ffs', 'ffs_ras']
 for s in SEEDS:
     for m in METHODS:
-        if os.path.exists(f'{CK}/{m}/seed{s}/selector.pt'):
-            print('skip', m, s); continue
+        if os.path.exists(f'{CK}/{m}/seed{s}/history.json'):   # finished runs only
+            print('skip (done)', m, s); continue
         !python train_selector.py --config configs/{m}.yaml --data_dir $FEAT --downstream $CK/downstream/downstream.pt --out_dir $CK/{m} --seed {s}
 """)
 
@@ -196,7 +198,7 @@ code("""
 RUN_ABLATIONS = False
 if RUN_ABLATIONS:
     for m in ['ffs_ras_fixedbeta', 'ffs_k8', 'ffs_ras_k8']:
-        if not os.path.exists(f'{CK}/{m}/seed0/selector.pt'):
+        if not os.path.exists(f'{CK}/{m}/seed0/history.json'):
             !python train_selector.py --config configs/{m}.yaml --data_dir $FEAT --downstream $CK/downstream/downstream.pt --out_dir $CK/{m} --seed 0
 """)
 

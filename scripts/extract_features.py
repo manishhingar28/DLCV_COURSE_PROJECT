@@ -79,7 +79,7 @@ def main():
     tok = open_clip.get_tokenizer(args.model)
     from PIL import Image
 
-    vmap = json.load(open(os.path.join(args.ann_dir, "map_vid_vidorID.json")))
+    vmap = json.load(open(os.path.join(args.ann_dir, "map_vid_vidorID.json"), encoding="utf-8"))
     zf = None
     if args.video_zip:
         import tempfile
@@ -104,7 +104,7 @@ def main():
         return torch.cat(out)
 
     for split in args.splits:
-        rows = list(csv.DictReader(open(os.path.join(args.ann_dir, f"{split}.csv"))))
+        rows = list(csv.DictReader(open(os.path.join(args.ann_dir, f"{split}.csv"), encoding="utf-8")))
         vids = sorted({r["video"] for r in rows})
         if args.max_videos:
             vids = vids[: args.max_videos]

@@ -41,8 +41,8 @@ def main():
     B = json.load(open(os.path.join(args.results, f"selections_{args.b}.json")))
     feats = torch.load(args.features, weights_only=False)
     vids = feats["video_ids"]
-    rows = {f"{r['video']}_{r['qid']}": r for r in csv.DictReader(open(os.path.join(args.ann_dir, "val.csv")))}
-    vmap = json.load(open(os.path.join(args.ann_dir, "map_vid_vidorID.json")))
+    rows = {f"{r['video']}_{r['qid']}": r for r in csv.DictReader(open(os.path.join(args.ann_dir, "val.csv"), encoding="utf-8"))}
+    vmap = json.load(open(os.path.join(args.ann_dir, "map_vid_vidorID.json"), encoding="utf-8"))
 
     if args.video_zip:
         zf = zipfile.ZipFile(args.video_zip)

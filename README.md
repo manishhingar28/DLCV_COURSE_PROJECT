@@ -1,6 +1,6 @@
-# FFS-RAS: Redundancy-Aware Flexible Frame Selection for Video QA
+# FFS + Similarity Cues: Better Learned Frame Selection for Video QA
 
-**Team:** `TeamXX` — *Name 1 (Roll), Name 2 (Roll), Name 3 (Roll), Name 4 (Roll)*
+**Team:** Team XX (Mitra Mandal): Abhishek Kumar Jha (230106001), Aditya Dhaniyaal (230106002), Dev Shukla (230106020), Dhruv Mishra (230106022), Manish Hingar (230106040)
 **Course:** Deep Learning for Computer Vision, 2026
 
 ## 1. Project overview
@@ -13,38 +13,42 @@ We found no public code for the paper, so the FFS baseline here is **our own re-
 to a large video-QA model. Learnable **[CTRL]** tokens compete with the frames inside a differentiable top-*k*, so the number of selected frames
 adapts per question (anywhere in `[k − c, k]`).
 
-**Our novelty: Redundancy-Aware Selection (RAS).** FFS scores every frame *independently*, so it often spends its small budget on
-near-duplicate neighbouring frames. RAS turns FFS's top-*k* into a **greedy, redundancy-penalised selection**. After each pick,
-every remaining frame's score is lowered by `β · similarity(frame, picked frame)`. The penalty strength β is **learned end-to-end**.
-[CTRL] tokens are never penalised, so once the remaining frames are mostly repeats, [CTRL] wins the remaining slots and the
-selector **stops early**. With β = 0, RAS is *exactly* FFS (it strictly generalises the baseline).
+**Our novelty: similarity-cue injection into the FFS selector.** FFS has to *learn* which frames matter from the
+answer loss alone, through a straight-through top-k. With frozen features this signal is weak: the learned selector
+barely beats uniform frames. We give the selector four **zero-shot relevance cues per frame**, computed from the same frozen
+EVA02-CLIP features with no labels and no extra model:
+cosine to the question, best and second-best "question + option" similarity, and their gap (how clearly the frame separates the answers).
+They are standardised within each video, added to the frame tokens, and fed to the selection logit through a linear skip
+(`l_t = g(h_t) + w·c_t`). FFS is the special case `w = 0`, so the selector only has to learn a *correction* to a strong zero-shot ranker.
 
-| | Uniform | Fixed top-k | FFS (paper) | **FFS + RAS (ours)** |
-|---|---|---|---|---|
-| Question-aware | ✗ | ✓ | ✓ | ✓ |
-| Adaptive number of frames | ✗ | ✗ | ✓ (relevance only) | ✓ (relevance **and novelty**) |
-| Avoids duplicate frames | partly | ✗ | ✗ | ✓ |
+**Ablation: Redundancy-Aware Selection (RAS).** We also tested a greedy top-k that penalises frames similar to already
+picked ones (submodular / DPP-style). It did **not** help: see the results and section 7.
 
 Where the modification lives in the code:
 
 | File | What |
 |---|---|
-| `src/selector.py` → `frame_similarity`, `sequential_topk` (`beta>0` branch), `FrameSelector.beta` | **Our novelty (RAS)** |
-| `src/selector.py` → `FrameSelector` with `beta=0` | FFS baseline (encoder, [CTRL] tokens, Gumbel top-k + straight-through) |
+| `src/selector.py` → `FrameSelector.frame_cues`, `cue_proj`, `cue_logit` (`sim_feats: true`) | **Our novelty (similarity cues)** |
+| `src/selector.py` → `frame_similarity`, `sequential_topk` (`beta>0`), `ras_sweep.py` | RAS ablation |
+| `src/selector.py` → `FrameSelector` with `sim_feats: false, beta: 0` | FFS baseline (encoder, [CTRL] tokens, Gumbel top-k + straight-through) |
 | `src/selector.py` → `oracle_count`, `count_hinge_loss`, `greedy_frame_scores`, decoupling in `FrameSelector.forward` | Training recipe for *all* flexible selectors (see §7) |
 | `src/downstream.py` | Frozen downstream QA model (stand-in for the paper's 8B VLM) |
 
 ## 2. Environment and dependencies
 
-Tested on **Google Colab, T4 GPU (16 GB), Python 3.12, PyTorch 2.x + CUDA 12**. CPU works for the tests and dummy run.
+Reported results: **Windows, NVIDIA RTX 2060 (6 GB), Python 3.11, PyTorch 2.5.1 + CUDA 11.8**. Features were extracted on
+**Google Colab (T4)**. CPU works for the tests and the dummy run.
 
 ```bash
 git clone <this-repo-url> ffs-diverse && cd ffs-diverse
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118   # GPU build (pick your CUDA)
 pip install -r requirements.txt
 python tests/test_selector.py        # 5 unit tests of the selection operators
 ```
 
 Easiest route: open **`notebooks/run_on_colab.ipynb`** in Colab and use *Runtime → Run all*. It does every step below.
+On a local NVIDIA GPU: see **`LOCAL_SETUP.md`** and run `python run_local.py --features features --extra fixed_topk_nocue ffs_nocue`
+(one resumable command; this is how the reported results were produced, on an RTX 2060).
 
 ## 3. Dataset preparation (NExT-QA, multiple choice)
 
@@ -79,10 +83,12 @@ python train_downstream.py --config configs/downstream.yaml --data_dir features 
 
 # Stage 2: selectors trained against the frozen downstream model (seeds 0,1,2)
 for s in 0 1 2; do
-  python train_selector.py --config configs/fixed_topk.yaml --seed $s   # ablation: always 4 frames
-  python train_selector.py --config configs/fixed_topk_ras.yaml --seed $s   # OURS at a fixed budget: top-4 + RAS
-  python train_selector.py --config configs/ffs.yaml        --seed $s   # baseline: FFS, 1–4 frames
-  python train_selector.py --config configs/ffs_ras.yaml    --seed $s   # OURS:     FFS + RAS, 1–4 frames
+  python train_selector.py --config configs/fixed_topk.yaml --seed $s   # OURS: top-4 + cues
+  python train_selector.py --config configs/fixed_topk_nocue.yaml --seed $s  # baseline: top-4, FFS-style input (no cues)
+  python train_selector.py --config configs/fixed_topk_ras.yaml --seed $s   # ablation: top-4 + cues + RAS
+  python train_selector.py --config configs/ffs_nocue.yaml  --seed $s   # baseline: FFS re-implementation (no cues)
+  python train_selector.py --config configs/ffs.yaml        --seed $s   # OURS: FFS + cues, 1–4 frames
+  python train_selector.py --config configs/ffs_ras.yaml    --seed $s   # ablation: FFS + cues + RAS
 done
 # optional ablations
 python train_selector.py --config configs/ffs_ras_fixedbeta.yaml   # beta fixed (not learned)
@@ -122,18 +128,29 @@ all with the **same frozen downstream model**. Outputs:
 
 | Item | Link |
 |---|---|
-| All checkpoints + configs + training logs (`submission_artifacts.zip`) | *add Google Drive link* |
-| Results table | `results/results_table.md` *(copy in after running)* |
+| All checkpoints + configs + training logs + results (`trained_models_and_results.zip`, 147 MB) | [Google Drive](https://drive.google.com/file/d/1A8pq_dSAi95zVbXmI1TmFEUdA_DV450K/view?usp=sharing) |
+| Results table | below, and `results_EVA02-L-14/results_table.md` inside the zip |
 
-**Results on NExT-QA val** *(fill in from `results/results_table.md`)*
+**Results on NExT-QA val** (4,996 questions, 32-frame pool, same frozen downstream model for all, mean ± std over 3 seeds):
 
-| Method | Avg frames | Acc | Causal | Temporal | Descr. | Redund.↓ |
+| Method | Frames | Acc | Causal | Temporal | Descr. | Rel. cost |
 |---|---|---|---|---|---|---|
-| uniform@4 | 4 | | | | | |
-| uniform@32 | 32 | | | | | |
-| fixed top-4 | 4 | | | | | |
-| FFS (re-impl.) | | | | | | |
-| **FFS + RAS (ours)** | | | | | | |
+| Uniform@1 | 1 | 45.40 | 44.3 | 42.1 | 55.9 | 0.031 |
+| Uniform@4 | 4 | 47.94 | 46.8 | 45.1 | 57.7 | 0.125 |
+| Uniform@32 | 32 | 48.40 | 46.9 | 46.3 | 57.9 | 1.000 |
+| Top-4, FFS-style input | 4 | 48.66 ± 0.19 | 47.8 | 45.7 | 57.7 | 0.125 |
+| **Top-4 + cues (ours)** | 4 | **49.71 ± 0.10** | 48.3 | 47.4 | 59.1 | 0.125 |
+| Top-4 + cues + RAS (ablation) | 4 | 49.71 ± 0.10 | 48.3 | 47.3 | 59.3 | 0.125 |
+| FFS (re-impl., adaptive 1–4) | 1.0 | 46.35 ± 0.19 | 44.9 | 44.0 | 56.2 | 0.031 |
+| **FFS + cues (ours)** | 1.0 | **47.20 ± 0.10** | 45.4 | 45.0 | 57.6 | 0.031 |
+| FFS + cues + RAS (ablation) | 1.0 | 47.22 ± 0.15 | 45.6 | 44.7 | 57.9 | 0.031 |
+
+* Cues add **+1.05** (top-4) and **+0.85** (adaptive FFS) points, about 5× the seed std, and help every question type.
+* With cues, **4 selected frames beat all 32 uniform frames** (49.71 vs 48.40) at 1/8 of the downstream cost.
+* Adaptive selectors settled on 1 frame, because this downstream model gains only 3 points from 1 → 32 uniform frames.
+* RAS left the picks unchanged (the penalty is small next to the learned score gaps). Learned picks are *more* mutually
+  similar than uniform ones (0.92 vs 0.89 mean cosine) yet more accurate: on NExT-QA, evidence clusters around the key moment.
+  `ras_sweep.py` re-applies RAS at inference with a scale-invariant penalty to test it when it does change the picks.
 
 ## 7. Differences from the paper (and why)
 
@@ -149,15 +166,13 @@ all with the **same frozen downstream model**. Outputs:
 * **Gradient decoupling.** Without it, the task loss always pushed the selector to use all k frames. So the task gradient only
   flows through a relaxation over frames (which frames). The [CTRL] threshold (how many) is learned by the count loss. Forward
   selections are unchanged.
-* **Selector similarity cues.** In a pilot on 300 training videos the selector's scores stayed flat (it was no better than random).
-  We therefore add four per-frame zero-shot cues (cosine to the question, best and second-best option similarity, and their gap,
-  standardised within each video) to the frame tokens and to the logit. This raised the share of selected frames that favour the
-  correct answer from 42% (uniform) to about 46%.
+* **Our novelty (similarity cues)** came out of a pilot on 300 training videos: without them the selector's scores stayed
+  flat (no better than random). See section 1 and the report for details.
 * **Regularised downstream model.** The pilot downstream model memorised its training set after 2 epochs, so it uses dropout 0.3,
   weight decay 0.1 and lr 1e-4.
 * All tuning used held-out *training* videos only, never the validation set.
-* These choices are applied **identically** to FFS and FFS+RAS. The only difference between the paired configs
-  (`ffs` vs `ffs_ras`, `fixed_topk` vs `fixed_topk_ras`) is `beta`.
+* The training recipe above is applied **identically** to every selector. Paired configs differ in one setting only:
+  `*_nocue` vs ours: `sim_feats` (false/true); ours vs `*_ras`: `beta` (0/learned).
 * An optional relevance-distillation loss (`lambda_distill`, off by default) is included; it did not help in the pilot.
 
 ## 8. Code organisation
@@ -173,7 +188,7 @@ evaluate.py         all methods on val, tables, plots
 scripts/            extract_features.py, visualize.py, run_all.sh, smoke_test.sh, build_notebook.py, make_dummy_data.py
 notebooks/          run_on_colab.ipynb (end-to-end)
 tests/              unit tests (selection operators, feature extraction)
-report/             one-page report LaTeX content
+report/             main.tex (one-page report, compile on Overleaf) + main.pdf
 ```
 
 Sanity check without data or GPU (~10 min, synthetic features, **not** for reporting): `bash scripts/smoke_test.sh`.

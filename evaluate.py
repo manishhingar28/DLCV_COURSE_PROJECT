@@ -18,6 +18,7 @@ import argparse
 import glob
 import json
 import os
+import sys
 from collections import defaultdict
 
 import numpy as np
@@ -94,6 +95,10 @@ def fmt(r, k, nd=2):
 
 
 def main():
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", default="features")
     ap.add_argument("--downstream", default="checkpoints/downstream/downstream.pt")
@@ -129,7 +134,7 @@ def main():
 
     # ---- trained selectors ----
     sel_flops = {}
-    pref = ["fixed_topk", "fixed_topk_ras", "ffs", "ffs_ras", "ffs_ras_fixedbeta", "ffs_k8", "ffs_ras_k8"]
+    pref = ["fixed_topk_nocue", "fixed_topk", "fixed_topk_ras", "ffs_nocue", "ffs", "ffs_ras", "ffs_ras_fixedbeta", "ffs_k8", "ffs_ras_k8"]
     mdirs = sorted(glob.glob(os.path.join(args.runs, "*")),
                    key=lambda p: (pref.index(os.path.basename(p)) if os.path.basename(p) in pref else 99, p))
     for mdir in mdirs:
@@ -187,8 +192,10 @@ def main():
                    + f" & {r['redundancy']:.3f} \\\\")
     tex += [r"\bottomrule", r"\end{tabular}"]
     # compact table for the one-page report
-    nice = {"uniform@4": "Uniform@4", f"uniform@{T}": f"Uniform@{T}", "fixed_topk": "Fixed top-4", "fixed_topk_ras": r"\textbf{Top-4+RAS (ours)}",
-            "ffs": "FFS (re-impl.)", "ffs_ras": r"\textbf{FFS+RAS (ours)}"}
+    nice = {"uniform@4": "Uniform@4", f"uniform@{T}": f"Uniform@{T}",
+            "fixed_topk_nocue": "Top-4 (FFS-style input)", "fixed_topk": r"\textbf{Top-4 + cues (ours)}",
+            "fixed_topk_ras": r"\quad + RAS (ablation)",
+            "ffs_nocue": "FFS (re-impl.)", "ffs": r"\textbf{FFS + cues (ours)}", "ffs_ras": r"\quad + RAS (ablation)"}
     ctex = [r"\begin{tabular}{@{}lccccccc@{}}", r"\toprule",
             r"Method & Frames & Acc & C & T & D & Red.$\downarrow$ & Cost \\", r"\midrule"]
     for name in nice:
@@ -201,12 +208,12 @@ def main():
                     + " & ".join(f"{r.get('acc_'+g, float('nan')):.1f}" for g in GROUPS)
                     + f" & {red} & {r['avg_frames']/T:.3f} \\\\")
     ctex += [r"\bottomrule", r"\end{tabular}"]
-    with open(os.path.join(args.out_dir, "results_table_compact.tex"), "w") as f:
+    with open(os.path.join(args.out_dir, "results_table_compact.tex"), "w", encoding="utf-8") as f:
         f.write("\n".join(ctex) + "\n")
-    with open(os.path.join(args.out_dir, "results_table.md"), "w") as f:
+    with open(os.path.join(args.out_dir, "results_table.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(md) + "\n\nRel. cost = avg downstream frames / " + str(T)
                 + " (downstream compute scales ~linearly with frames).\n")
-    with open(os.path.join(args.out_dir, "results_table.tex"), "w") as f:
+    with open(os.path.join(args.out_dir, "results_table.tex"), "w", encoding="utf-8") as f:
         f.write("\n".join(tex) + "\n")
     print("\n".join(md))
 

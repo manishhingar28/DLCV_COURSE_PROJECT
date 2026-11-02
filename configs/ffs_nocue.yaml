@@ -1,0 +1,29 @@
+# Ablation: FFS WITHOUT similarity cues (paper-style selector input), 1..4 frames
+out_dir: checkpoints/ffs_nocue
+data_dir: features
+downstream: checkpoints/downstream/downstream.pt
+seed: 0
+split_seed: 0
+dev_frac: 0.1
+device: auto
+epochs: 10
+batch_size: 128
+lr: 0.0003
+weight_decay: 0.05
+lambda_count: 1.0
+lambda_budget: 0.0
+lambda_red: 0.0
+selector:
+  d_model: 256
+  n_layers: 2
+  n_heads: 4
+  dropout: 0.1
+  tau: 1.0
+  k: 4
+  n_ctrl: 3
+  beta: 0.0
+  learn_beta: false
+  sim_feats: false
+lambda_distill: 0.0
+distill_temp: 0.01
+count_eps: 0.1

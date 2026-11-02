@@ -21,13 +21,13 @@ def get_device(pref="auto"):
 
 
 def load_yaml(path):
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
 def save_json(obj, path):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, indent=2)
 
 
@@ -36,11 +36,14 @@ class Logger:
 
     def __init__(self, path):
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        self.f = open(path, "a")
+        self.f = open(path, "a", encoding="utf-8")
 
     def __call__(self, *msg):
         s = " ".join(str(m) for m in msg)
-        print(s, flush=True)
+        try:
+            print(s, flush=True)
+        except UnicodeEncodeError:
+            print(s.encode("ascii", "replace").decode(), flush=True)
         self.f.write(s + "\n")
         self.f.flush()
 

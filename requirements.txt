@@ -1,4 +1,5 @@
-torch>=2.1
+# torch >= 2.1: install the GPU build FIRST from https://pytorch.org (e.g. --index-url .../whl/cu118);
+# it is not listed here because pip would replace a GPU build with a CPU-only one on Windows.
 numpy
 pyyaml
 tqdm
