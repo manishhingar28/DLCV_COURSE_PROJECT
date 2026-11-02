@@ -9,3 +9,5 @@ report/*.aux
 report/*.log
 report/*.fls
 report/*.fdb_latexmk
+.DS_Store
+work/
