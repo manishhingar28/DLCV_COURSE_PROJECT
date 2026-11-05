@@ -1,102 +1,189 @@
-\documentclass[10pt]{article}
-\usepackage[a4paper,margin=1.6cm,top=1.3cm,bottom=1.3cm]{geometry}
-\IfFileExists{lmodern.sty}{\usepackage{lmodern}}{}
-\usepackage[T1]{fontenc}
-\usepackage{amsmath,amssymb,booktabs,enumitem,url}
-\usepackage[hidelinks]{hyperref}
-\usepackage[compact]{titlesec}
-\usepackage[font=footnotesize,labelfont=bf,skip=2pt]{caption}
-\titleformat{\section}{\large\bfseries}{}{0pt}{}
-\titlespacing*{\section}{0pt}{5pt}{2pt}
-\setlist[enumerate]{leftmargin=1.6em,itemsep=1pt,topsep=1pt,parsep=0pt}
-\pagestyle{empty}
+\documentclass[8pt,a4paper]{article}
+
+% ------------------------------------------------
+% Packages
+% ------------------------------------------------
+\usepackage[
+    top=0.15in,
+    bottom=0.15in,
+    left=0.55in,
+    right=0.55in
+]{geometry}
+
+\usepackage{amsmath,amsfonts,amssymb}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{makecell}
+\usepackage{caption}
+\usepackage{hyperref}
+\usepackage{titlesec}
+
+% ------------------------------------------------
+% Formatting
+% ------------------------------------------------
+
+% Black-and-white hyperlinks
+\hypersetup{
+    colorlinks=true,
+    allcolors=black
+}
+
+% Reduce line spacing
+\linespread{0.52}
+
+% Reduce paragraph spacing
 \setlength{\parindent}{0pt}
+\setlength{\parskip}{1pt}
 
+% Reduce section heading spacing
+\titlespacing*{\subsection}
+{0pt}{7pt}{3pt}
+
+% Table formatting
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.05}
+
+\captionsetup[table]{
+    font=small,
+    labelfont=bf,
+    position=top,
+    skip=3pt
+}
+
+% ------------------------------------------------
+% Document
+% ------------------------------------------------
 \begin{document}
+\thispagestyle{empty}
+
+% ------------------------------------------------
+% Title and Team Information
+% ------------------------------------------------
 \begin{center}
-{\large\bfseries Similarity-Cue Injection for Flexible Frame Selection in Video Question Answering}\\[2pt]
-\textbf{Team No:} XX (Mitra Mandal) \quad$|$\quad \textbf{Members:} Abhishek Kumar Jha (230106001), Aditya Dhaniyaal (230106002),
-Dev Shukla (230106020), Dhruv Mishra (230106022), Manish Hingar (230106040)\\
-\textbf{GitHub:} \url{https://github.com/manishhingar28/DLCV_COURSE_PROJECT}
+
+{\large\bfseries
+Similarity-Cue Injection for Flexible Frame Selection in Video Question Answering}\\[4pt]
+
+\textbf{Team:} Mitra Mandal
+\quad | \quad
+\textbf{Members:}
+Abhishek Kumar Jha (230106001), Aditya Dhaniyaal (230106002),\\[2pt]
+Dev Shukla (230106020), Dhruv Mishra (230106022), Manish Hingar (230106040)\\[3pt]
+
+\textbf{GitHub:}
+\url{https://github.com/manishhingar28/DLCV_COURSE_PROJECT}
+
 \end{center}
-\vspace{-4pt}
 
-\section*{I. Abstract (Maximum 100 Words)}
+\vspace{-5pt}
+
+% ------------------------------------------------
+\subsection*{I. Abstract (Maximum 100 Words)}
+% ------------------------------------------------
 \begin{enumerate}
-\item Video-language models are costly because every input frame passes through a large model, so systems feed a few
-uniformly sampled frames and can miss the moment the question is about.
-\item Buch et al.\ (CVPR 2025) put a light Flexible Frame Selector (FFS) in front of the large model: it scores frames
-against the question and keeps the useful ones through a differentiable top-$k$.
-\item Learnable \texttt{[CTRL]} tokens inside that top-$k$ let it also decide \emph{how many} frames ($k{-}c$ to $k$) each
-question needs. It learns from the answer loss alone, with no frame labels.
+    \item Video-language models are costly because every input frame passes through a large model.
+    \item So systems feed a few uniform frames, which can miss the key moment or waste budget.
+    \item Buch et al.\ (CVPR 2025) place a light Flexible Frame Selector (FFS) before the large model: it scores frames against the question, keeps the useful ones via a differentiable top-$k$, and uses learnable \texttt{[CTRL]} tokens to decide \emph{how many} ($k{-}c$ to $k$).
+    \item We read this as learning, from the answer loss alone, which evidence a question needs, so fewer frames match dense sampling.
 \end{enumerate}
 
-\section*{II. Proposed Novelty \& Technical Contribution}
+% ------------------------------------------------
+\subsection*{II. Proposed Novelty \& Technical Contribution}
+% ------------------------------------------------
 \begin{enumerate}
-\item \textbf{Similarity-cue injection} (new module, 0.07M parameters): FFS must discover frame relevance from the answer
-loss alone, through a straight-through top-$k$. With frozen EVA02-CLIP-L/14 features this signal is weak (its learned top-4
-is only +0.7 over uniform frames). We compute four \emph{zero-shot relevance cues} per frame from the same frozen
-features (cosine to the question, best and second-best ``question\,+\,option'' similarity, and their gap), standardise
-them within each video, and feed them to the selector's frame tokens and, through a linear skip, to its selection logit.
-\item It changes the selector input only: encoder, \texttt{[CTRL]} tokens, Gumbel top-$k$, losses and downstream model are
-unchanged. It needs no labels and no extra network.
-\item Difference: the baseline learns question--frame similarity through attention; ours starts from a zero-shot ranker and
-learns a correction. Both share our FFS recipe (\texttt{[CTRL]} count hinge from fixed-$k$ policies).
+    \item \textbf{Similarity-cue injection} (new module, 0.07M params): FFS learns frame relevance from the answer loss alone through a straight-through top-$k$, a weak signal with frozen EVA02-CLIP-L/14 features (its top-4 is only +0.7 over uniform). We compute four \emph{zero-shot relevance cues} per frame from the same features (cosine to the question, best and second-best ``question\,+\,option'' similarity, their gap), standardise them per video, and feed them to the frame tokens and, via a linear skip, to the selection logit.
+    \item Type: architectural modification (new cue module at the selector input); encoder, \texttt{[CTRL]}, Gumbel top-$k$, losses and downstream model unchanged; no labels, no extra network.
+    \item Difference: FFS learns question--frame similarity through attention from scratch; ours starts from a zero-shot ranker and learns a correction. Both share our FFS recipe (\texttt{[CTRL]} count hinge from fixed-$k$ policies).
 \end{enumerate}
 
-\section*{III. Theoretical / Mathematical Justification}
+% ------------------------------------------------
+\subsection*{III. Theoretical / Mathematical Justification}
+% ------------------------------------------------
 \begin{enumerate}
-\item $s_{mt}=\langle\hat t_m,\hat f_t\rangle$,\;
-$c_t=[\langle\hat q,\hat f_t\rangle,\,s_{(1)t},\,s_{(2)t},\,s_{(1)t}-s_{(2)t}]$,\;
-$\tilde c_t=(c_t-\mu_{\mathrm{vid}})/\sigma_{\mathrm{vid}}$,\;
-$l_t=g_\theta\big(h_t+\phi(\tilde c_t)\big)+w^\top\tilde c_t$,
-(hats: normalised features; $\hat t_m$: text of option $m$; $s_{(1)},s_{(2)}$: two best options). For $w{=}0,\phi{=}0$ the model
-equals FFS, so the proposed model class contains the baseline.
-\item \textbf{Residual learning:} without cues, relevance must be learned as a bilinear map
-$\langle W_Q\hat q,W_K\hat f_t\rangle$ in a 768-d space from noisy straight-through gradients. Ours supplies this statistic
-in closed form ($g_\theta{=}0$ ranks by $w^\top\tilde c_t$), so $g_\theta$ only learns a correction, which lowers sample complexity.
-\item \textbf{Margin = evidence:} with $p(m|f_t)\propto e^{s_{mt}/T}$, a large gap $s_{(1)t}-s_{(2)t}$ means a low
-posterior entropy $H(a\,|\,q,f_t)$, so the cue marks frames that \emph{discriminate} between answers, without the answer label.
-\item \textbf{Standardisation:} top-$k$ depends only on the order of $l_t$, which no per-video affine change alters; CLIP
-cosines shift strongly across videos (mean frame--frame cosine 0.89), so $\tilde c_t$ removes this nuisance.
-\item \textbf{Ablation hypothesis (RAS):} a redundancy-aware greedy top-$k$, $i_t=\arg\max_i l_i-\beta\sum_{j\in A_{t-1}}S_{ij}$
-(submodular), on the idea that near-duplicate frames waste the budget.
+    \item $s_{mt}=\langle\hat t_m,\hat f_t\rangle,\quad c_t=\big[\langle\hat q,\hat f_t\rangle,\ s_{(1)t},\ s_{(2)t},\ s_{(1)t}-s_{(2)t}\big],\quad \tilde c_t=(c_t-\mu_{\mathrm{vid}})/\sigma_{\mathrm{vid}},\quad l_t=g_\theta\big(h_t+\phi(\tilde c_t)\big)+w^\top\tilde c_t.$
+    \item $\hat f_t,\hat q,\hat t_m$: normalised frame, question and ``question\,+\,option $m$'' features; $s_{(1)},s_{(2)}$: two best options; $h_t$: frame token; $g_\theta$: FFS encoder/head; $l_t$: selection logit. $w{=}0,\phi{=}0$ gives FFS, so our class contains the baseline. \textbf{Residual learning:} without cues, relevance must be learned as a bilinear map $\langle W_Q\hat q,W_K\hat f_t\rangle$ in 768-d from noisy straight-through gradients; the cues give it in closed form ($g_\theta{=}0$ ranks by $w^\top\tilde c_t$), so $g_\theta$ learns only a correction (lower sample complexity). \textbf{Margin = evidence:} with $p(m|f_t)\propto e^{s_{mt}/T}$, a large $s_{(1)t}-s_{(2)t}$ means low entropy $H(a|q,f_t)$: a frame that \emph{discriminates} answers, found without the label. \textbf{Standardisation:} top-$k$ depends only on the order of $l_t$, unchanged by per-video affine shifts, while CLIP cosines shift strongly across videos (mean 0.89); $\tilde c_t$ removes this nuisance.
+    \item Causal link: better ranking $\Rightarrow$ the same $k$ frames carry more answer evidence $\Rightarrow$ higher accuracy at equal cost (tested in Table~\ref{tab:results}). Ablation (RAS): greedy $i_t=\arg\max_i l_i-\beta\sum_{j\in A_{t-1}}S_{ij}$ (submodular), assuming near-duplicate frames waste budget.
 \end{enumerate}
 
-\section*{IV. Comparative Results \& Empirical Evaluation}
+% ------------------------------------------------
+\subsection*{IV. Comparative Results \& Empirical Evaluation}
+% ------------------------------------------------
 \begin{enumerate}
-\item NExT-QA multiple choice, val (4,996 Qs), 32-frame pool, frozen EVA02-CLIP-L/14 features; a small frozen QA model (2.0M
-params) replaces the paper's 8B VLM, so absolute accuracy is not comparable to the paper's.
-\item Same downstream model and recipe for all; tuning on held-out \emph{training} videos only; 3 seeds, mean\,$\pm$\,std;
-Cost = frames given to the downstream model\,/\,32.
-\item Takeaway: +1.05 accuracy at 4 frames and +0.85 at 1 frame for +0.07M parameters; 4 selected frames beat 32 uniform frames at 1/8 of the cost.
+    \item NExT-QA multiple choice, val (4,996 Qs; train 34,132), 32-frame pool, frozen EVA02-CLIP-L/14 features at 224\,px; a small frozen QA model (2.0M params) replaces the paper's 8B VLM, so absolute accuracy is not comparable. Shared downstream model and recipe; tuning on held-out \emph{training} videos only; 3 seeds.
+    \item Reproduced baseline (FFS-style input) vs ours at 4 frames and with adaptive FFS (1--4); Frames = frames given to the downstream model.
+    \item Takeaway: +1.05 accuracy at 4 frames and +0.85 at 1 frame for +0.07M parameters; with cues, 4 selected frames beat all 32 uniform frames at 1/8 of the downstream cost.
 \end{enumerate}
 
-\begin{table}[h]\centering
-\caption{Quantitative comparison of the baseline and proposed method on NExT-QA (val, 3 seeds). Best results are highlighted in bold.}
-\vspace{-2pt}
-\footnotesize\setlength{\tabcolsep}{3.5pt}
-\begin{tabular}{@{}lccccccc@{}}
+% ------------------------------------------------
+% Results Table
+% ------------------------------------------------
+\begin{center}
+
+\captionof{table}{
+Quantitative comparison of the baseline and
+proposed method on NExT-QA (val, 3 seeds).
+Best results are highlighted in bold.
+}
+
+\label{tab:results}
+
+\small
+
+\begin{tabularx}{\linewidth}{
+    @{}X c c c c c c@{}
+}
+
 \toprule
-\textbf{Method} & \textbf{Frames} & \textbf{Acc (\%\,$\uparrow$)} & \textbf{Causal} & \textbf{Temp.} & \textbf{Descr.} & \textbf{Cost ($\downarrow$)} & \textbf{Params (M)} \\
+
+\textbf{Method}
+&
+\makecell{\textbf{Acc}\\(\% $\uparrow$)}
+&
+\makecell{\textbf{Causal}\\($\uparrow$)}
+&
+\makecell{\textbf{Temporal}\\($\uparrow$)}
+&
+\makecell{\textbf{Descr.}\\($\uparrow$)}
+&
+\makecell{\textbf{Frames}\\($\downarrow$)}
+&
+\makecell{\textbf{Params}\\(M)}
+\\
+
 \midrule
-Uniform@32 / Uniform@4 & 32 / 4 & 48.40 / 47.94 & 46.9 / 46.8 & 46.3 / 45.1 & 57.9 / 57.7 & 1.000 / 0.125 & -- \\
-Baseline: Top-4 (FFS-style input) & 4 & 48.66 $\pm$ 0.19 & 47.8 & 45.7 & 57.7 & 0.125 & 2.05 \\
-\textbf{Ours: Top-4 + cues} & 4 & \textbf{49.71 $\pm$ 0.10} & \textbf{48.3} & \textbf{47.4} & \textbf{59.1} & 0.125 & 2.12 \\
-Baseline: FFS [paper], adaptive & 1.0 & 46.35 $\pm$ 0.19 & 44.9 & 44.0 & 56.2 & \textbf{0.031} & 2.05 \\
-\textbf{Ours: FFS + cues}, adaptive & 1.0 & 47.20 $\pm$ 0.10 & 45.4 & 45.0 & 57.6 & \textbf{0.031} & 2.12 \\
-Ablation: Top-4 + cues + RAS & 4 & 49.71 $\pm$ 0.10 & 48.3 & 47.3 & 59.3 & 0.125 & 2.12 \\
+
+Uniform sampling, 32 frames / 4 frames
+& 48.40 / 47.94 & 46.9 / 46.8 & 46.3 / 45.1 & 57.9 / 57.7 & 32 / 4 & -- \\
+
+Baseline: Top-4 (FFS-style input)
+& 48.66 $\pm$ 0.19 & 47.8 & 45.7 & 57.7 & 4 & 2.05 \\
+
+\textbf{Ours: Top-4 + similarity cues}
+& \textbf{49.71 $\pm$ 0.10} & \textbf{48.3} & \textbf{47.4} & \textbf{59.1} & 4 & 2.12 \\
+
+Baseline: FFS [paper, re-impl.], adaptive 1--4
+& 46.35 $\pm$ 0.19 & 44.9 & 44.0 & 56.2 & \textbf{1.0} & 2.05 \\
+
+\textbf{Ours: FFS + similarity cues}, adaptive
+& 47.20 $\pm$ 0.10 & 45.4 & 45.0 & 57.6 & \textbf{1.0} & 2.12 \\
+
+Ablation: Top-4 + cues + RAS
+& 49.71 $\pm$ 0.10 & 48.3 & 47.3 & 59.3 & 4 & 2.12 \\
+
 \midrule
-$\Delta$ (Ours -- Baseline), top-4 / FFS & -- & +1.05 / +0.85 & +0.5 / +0.6 & +1.7 / +1.0 & +1.4 / +1.4 & 0 & +0.07 \\
+
+$\Delta$ (Ours -- Baseline), top-4 / FFS
+& +1.05 / +0.85 & +0.5 / +0.6 & +1.7 / +1.0 & +1.4 / +1.4 & same & +0.07 \\
+
 \bottomrule
-\end{tabular}
-\end{table}
-\vspace{-8pt}
-\textbf{Result Interpretation:} Cues improve both selectors in every question type (most: Temporal), by about 5$\times$ the
-seed std. With cues, 4 selected frames \emph{beat} all 32 uniform frames (+1.3) at 1/8 of the cost; the FFS-style input only
-matches them (+0.3). FFS+cues with one frame ties Uniform@2 (47.14) at half the cost. Adaptive selectors settled on one frame,
-as this downstream model gains only 3.0 points from 1$\to$32 uniform frames. RAS left the picks unchanged (score gaps dwarf the
-penalty); learned picks are \emph{more} similar than uniform ones (0.92 vs 0.89) yet more accurate, so evidence clusters around
-the key moment and diversity is not the bottleneck. Caveats: no per-question significance test; a small downstream model, not an
-8B VLM; the selector reads features of all 32 frames (cost counts downstream frames, as in the paper).
+
+\end{tabularx}
+
+\end{center}
+
+\vspace{-5pt}
+
+\textbf{Result Interpretation:}
+Cues improve both selectors in every question type (most: Temporal) by about 5$\times$ the seed std at the same cost; with cues, 4 selected frames \emph{beat} all 32 uniform frames (+1.3) at 1/8 of the cost, while the FFS-style input only matches them (+0.3), confirming that cues improve \emph{which} frames are chosen. Trade-offs: adaptive selectors settled on one frame (this downstream model gains only 3.0 points from 1$\to$32 frames); RAS left picks unchanged, and learned picks are \emph{more} similar than uniform ones (0.92 vs 0.89) yet more accurate, so evidence clusters around key moments. Caveats: no per-question significance test; small downstream model; selector reads all 32 frames' features.
+
 \end{document}

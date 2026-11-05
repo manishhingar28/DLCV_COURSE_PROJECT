@@ -1,6 +1,6 @@
 # FFS + Similarity Cues: Better Learned Frame Selection for Video QA
 
-**Team:** Team XX (Mitra Mandal): Abhishek Kumar Jha (230106001), Aditya Dhaniyaal (230106002), Dev Shukla (230106020), Dhruv Mishra (230106022), Manish Hingar (230106040)
+**Team:** Mitra Mandal: Abhishek Kumar Jha (230106001), Aditya Dhaniyaal (230106002), Dev Shukla (230106020), Dhruv Mishra (230106022), Manish Hingar (230106040)
 **Course:** Deep Learning for Computer Vision, 2026
 
 ## 1. Project overview
